@@ -1,10 +1,11 @@
 # =========================================================
-# 📚 Student Study Companion App
-# A simple Streamlit app with 4 beginner-friendly features:
+# 📚 Student Study Companion App (AI-Focused Edition)
+# A simple Streamlit app with 5 beginner-friendly features:
 #   1) Mood Detection      -> Small TensorFlow text classifier
 #   2) Study Planner       -> Simple priority-based timetable
 #   3) Notes Simplifier    -> Rule-based text simplifier
-#   4) Focus Timer         -> Basic Pomodoro timer
+#   4) AI Quiz & Analysis  -> Quiz + TensorFlow classification model
+#   5) Focus Timer         -> Basic Pomodoro timer
 #
 # No paid APIs, no Hugging Face, no PyTorch.
 # Works on Python 3.11 and below.
@@ -33,10 +34,6 @@ from tensorflow.keras.layers import Embedding, GlobalAveragePooling1D, Dense
 # Basic page configuration
 # ---------------------------------------------------------
 st.set_page_config(page_title="Student Study Companion", page_icon="📚", layout="centered")
-
-# Set seeds so the model behaves consistently each run
-np.random.seed(42)
-tf.random.set_seed(42)
 
 
 # =========================================================
@@ -100,6 +97,9 @@ def build_mood_model():
     classification model + the tokenizer used to prepare text.
     Cached so this only runs ONCE when the app starts.
     """
+    np.random.seed(42)
+    tf.random.set_seed(42)
+
     # Step 1: Tokenizer converts words into numbers
     tokenizer = Tokenizer(num_words=VOCAB_SIZE, oov_token="<OOV>")
     tokenizer.fit_on_texts(TRAIN_TEXTS)
@@ -279,16 +279,242 @@ def simplify_notes(text):
 
 
 # =========================================================
+# 4) AI QUIZ GENERATOR + STUDENT ANALYSIS (CORE AI MODULE)
+# =========================================================
+
+# ---------------------------------------------------------
+# 4A. Quiz Questions (predefined, 3 per category = 9 total)
+# Categories: Memorization, Understanding, Application
+# ---------------------------------------------------------
+QUIZ_QUESTIONS = [
+    # ---- Memorization (recall facts) ----
+    {
+        "category": "Memorization",
+        "question": "What is the chemical symbol for water?",
+        "options": ["H2O", "CO2", "O2", "NaCl"],
+        "answer": "H2O",
+    },
+    {
+        "category": "Memorization",
+        "question": "What is the capital city of France?",
+        "options": ["Paris", "London", "Berlin", "Rome"],
+        "answer": "Paris",
+    },
+    {
+        "category": "Memorization",
+        "question": "How many continents are there on Earth?",
+        "options": ["5", "6", "7", "8"],
+        "answer": "7",
+    },
+
+    # ---- Understanding (concept-based) ----
+    {
+        "category": "Understanding",
+        "question": "Why does ice float on water?",
+        "options": [
+            "Ice is less dense than water",
+            "Ice is heavier than water",
+            "Ice has more molecules than water",
+            "Water repels ice"
+        ],
+        "answer": "Ice is less dense than water",
+    },
+    {
+        "category": "Understanding",
+        "question": "What is the main purpose of photosynthesis in plants?",
+        "options": [
+            "To convert sunlight into chemical energy",
+            "To absorb water from the soil",
+            "To release carbon dioxide",
+            "To produce heat for the plant"
+        ],
+        "answer": "To convert sunlight into chemical energy",
+    },
+    {
+        "category": "Understanding",
+        "question": "Why do we experience different seasons during the year?",
+        "options": [
+            "Because of Earth's tilt on its axis",
+            "Because the sun moves around Earth",
+            "Because the moon blocks sunlight",
+            "Because clouds change color"
+        ],
+        "answer": "Because of Earth's tilt on its axis",
+    },
+
+    # ---- Application (scenario-based) ----
+    {
+        "category": "Application",
+        "question": "A plant is kept in a completely dark room for two weeks. What will most likely happen?",
+        "options": [
+            "It will grow faster",
+            "It will turn yellow and become weak",
+            "It will produce more flowers",
+            "Nothing will change"
+        ],
+        "answer": "It will turn yellow and become weak",
+    },
+    {
+        "category": "Application",
+        "question": "A car suddenly brakes while moving forward. What happens to the passengers due to inertia?",
+        "options": [
+            "They are pushed backward",
+            "They are pushed forward",
+            "They stay perfectly still",
+            "They float upward"
+        ],
+        "answer": "They are pushed forward",
+    },
+    {
+        "category": "Application",
+        "question": "You mix baking soda with vinegar inside a sealed bottle. What is likely to happen?",
+        "options": [
+            "Nothing happens at all",
+            "The mixture freezes solid",
+            "Gas builds up and pressure increases",
+            "The liquid turns into a solid"
+        ],
+        "answer": "Gas builds up and pressure increases",
+    },
+]
+
+ANALYSIS_CATEGORIES = ["Memorization", "Understanding", "Application"]
+
+# Labels predicted by the AI model
+ANALYSIS_LABELS = {
+    0: "Strong in Memorization",
+    1: "Strong in Understanding",
+    2: "Strong in Application",
+    3: "Balanced",
+}
+
+
+# ---------------------------------------------------------
+# 4B. Build a small dummy dataset + train a Dense NN
+# ---------------------------------------------------------
+@st.cache_resource(show_spinner="Training student analysis model...")
+def build_analysis_model():
+    """
+    Creates a small dummy dataset of (memorization, understanding, application)
+    scores, each ranging from 0 to 3 (since each category has 3 questions).
+
+    Labeling logic (used to create training labels):
+      - If the difference between the highest and lowest score is small
+        (<= 1), the student is labeled "Balanced".
+      - Otherwise, the student is labeled as "Strong" in whichever
+        category has the highest score.
+
+    A small Dense neural network is then trained to learn this pattern.
+    This demonstrates a real TensorFlow classification model, even
+    though the dataset is synthetic and lightweight.
+    """
+    np.random.seed(123)
+    tf.random.set_seed(123)
+
+    X = []
+    y = []
+
+    # Generate 400 random score combinations (0 to 3 for each category)
+    for _ in range(400):
+        scores = np.random.randint(0, 4, size=3)  # [mem, understanding, application]
+        diff = scores.max() - scores.min()
+
+        if diff <= 1:
+            label = 3  # Balanced
+        else:
+            label = int(np.argmax(scores))  # 0, 1, or 2
+
+        X.append(scores)
+        y.append(label)
+
+    # Normalize scores to range 0-1 (helps the neural network train better)
+    X = np.array(X, dtype=np.float32) / 3.0
+    y = np.array(y, dtype=np.int32)
+
+    # Build a small Sequential Dense neural network
+    model = Sequential([
+        Dense(16, activation="relu", input_shape=(3,)),
+        Dense(16, activation="relu"),
+        Dense(4, activation="softmax")  # 4 output classes
+    ])
+
+    model.compile(
+        optimizer="adam",
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"]
+    )
+
+    # Train the model on the synthetic dataset
+    model.fit(X, y, epochs=50, verbose=0)
+
+    return model
+
+
+def predict_strength(mem_score, under_score, app_score, model):
+    """
+    Takes the student's category scores (each 0-3), normalizes them,
+    and uses the trained TensorFlow model to predict the student's
+    overall strength category.
+    """
+    input_data = np.array([[mem_score, under_score, app_score]], dtype=np.float32) / 3.0
+    prediction = model.predict(input_data, verbose=0)
+    label_index = int(np.argmax(prediction))
+    return ANALYSIS_LABELS[label_index], prediction[0]
+
+
+# ---------------------------------------------------------
+# 4C. Personalized Feedback based on AI prediction
+# ---------------------------------------------------------
+def get_feedback_message(prediction_label, scores):
+    """Returns a personalized feedback message based on the AI prediction."""
+    mem = scores["Memorization"]
+    under = scores["Understanding"]
+    app = scores["Application"]
+
+    if prediction_label == "Strong in Memorization":
+        return (
+            f"You're great at recalling facts (Memorization: {mem}/3)! "
+            "Try focusing more on understanding *why* things happen and "
+            "practicing scenario-based (application) questions."
+        )
+    elif prediction_label == "Strong in Understanding":
+        return (
+            f"You understand concepts well (Understanding: {under}/3)! "
+            "Try memorizing key facts and definitions, and practice applying "
+            "your knowledge to real-world situations."
+        )
+    elif prediction_label == "Strong in Application":
+        return (
+            f"You're excellent at applying knowledge to real scenarios "
+            f"(Application: {app}/3)! Strengthen your basics by reviewing "
+            "key facts and core concepts."
+        )
+    else:  # Balanced
+        return (
+            "You have a balanced performance across Memorization, "
+            "Understanding, and Application. Keep practicing all areas "
+            "to maintain this strong, well-rounded balance!"
+        )
+
+
+# =========================================================
 # STREAMLIT APP LAYOUT
 # =========================================================
 
 st.title("📚 Student Study Companion")
-st.write("A simple all-in-one app to help you study smarter!")
+st.write("A simple all-in-one app to help you study smarter — powered by TensorFlow!")
 
 # Sidebar navigation
 page = st.sidebar.radio(
     "Choose a feature:",
-    ["🏠 Home", "😊 Mood Detector", "🗓️ Study Planner", "📝 Notes Simplifier", "⏱️ Focus Timer"]
+    [
+        "🏠 Home",
+        "😊 Mood Detector",
+        "🗓️ Study Planner",
+        "📝 Notes Simplifier",
+        "🧠 AI Quiz & Analysis",
+        "⏱️ Focus Timer",
+    ]
 )
 
 
@@ -298,11 +524,12 @@ page = st.sidebar.radio(
 if page == "🏠 Home":
     st.header("Welcome!")
     st.write("""
-    This app has 4 simple tools to help students:
+    This app has 5 simple tools to help students:
 
     - **Mood Detector** – Tell the app how you feel, and a small TensorFlow model will guess your mood.
     - **Study Planner** – Enter your subjects and available hours to get a simple study schedule.
     - **Notes Simplifier** – Paste a paragraph and get a simpler version of it.
+    - **AI Quiz & Analysis** – Take a 9-question quiz and let a TensorFlow model analyze your strengths.
     - **Focus Timer** – A basic Pomodoro-style timer to help you focus.
 
     👉 Use the sidebar on the left to switch between tools.
@@ -383,6 +610,112 @@ elif page == "📝 Notes Simplifier":
             simplified = simplify_notes(notes_input)
             st.subheader("Simplified Version")
             st.write(simplified)
+
+
+# ---------------------------------------------------------
+# AI QUIZ & ANALYSIS PAGE
+# ---------------------------------------------------------
+elif page == "🧠 AI Quiz & Analysis":
+    st.header("🧠 AI Quiz & Student Analysis")
+    st.write(
+        "Answer 9 questions across 3 categories. A small TensorFlow model "
+        "will then analyze your scores and predict your learning strengths."
+    )
+
+    # Initialize session state values (only runs once)
+    if "quiz_submitted" not in st.session_state:
+        st.session_state.quiz_submitted = False
+    if "quiz_scores" not in st.session_state:
+        st.session_state.quiz_scores = {cat: 0 for cat in ANALYSIS_CATEGORIES}
+
+    tab1, tab2 = st.tabs(["📝 Take Quiz", "📊 Result & Dashboard"])
+
+    # -----------------------------------------------------
+    # TAB 1: Quiz Interface
+    # -----------------------------------------------------
+    with tab1:
+        with st.form("quiz_form"):
+            user_answers = []
+
+            for i, q in enumerate(QUIZ_QUESTIONS):
+                st.markdown(f"**Q{i + 1} ({q['category']}):** {q['question']}")
+                answer = st.radio(
+                    "Choose your answer:",
+                    q["options"],
+                    key=f"quiz_q_{i}",
+                    index=None,
+                )
+                user_answers.append(answer)
+                st.write("---")
+
+            submitted = st.form_submit_button("Submit Quiz")
+
+        if submitted:
+            if None in user_answers:
+                st.warning("Please answer all questions before submitting.")
+            else:
+                # Calculate score per category
+                scores = {cat: 0 for cat in ANALYSIS_CATEGORIES}
+                for i, q in enumerate(QUIZ_QUESTIONS):
+                    if user_answers[i] == q["answer"]:
+                        scores[q["category"]] += 1
+
+                st.session_state.quiz_scores = scores
+                st.session_state.quiz_submitted = True
+                st.success("✅ Quiz submitted! Go to the 'Result & Dashboard' tab to see your AI analysis.")
+
+    # -----------------------------------------------------
+    # TAB 2: Result + Dashboard (CORE AI PART)
+    # -----------------------------------------------------
+    with tab2:
+        if not st.session_state.quiz_submitted:
+            st.info("Please complete and submit the quiz in the 'Take Quiz' tab first.")
+        else:
+            scores = st.session_state.quiz_scores
+
+            # ---- Show scores per category ----
+            st.subheader("📊 Your Scores per Category")
+            score_df = pd.DataFrame({
+                "Category": list(scores.keys()),
+                "Score (out of 3)": list(scores.values())
+            })
+            st.dataframe(score_df, use_container_width=True, hide_index=True)
+
+            # Bar chart of category scores
+            st.bar_chart(score_df.set_index("Category"))
+
+            # ---- AI Prediction using TensorFlow model ----
+            st.subheader("🤖 AI Prediction")
+            analysis_model = build_analysis_model()
+            prediction_label, probabilities = predict_strength(
+                scores["Memorization"],
+                scores["Understanding"],
+                scores["Application"],
+                analysis_model,
+            )
+            st.success(f"**Predicted Category: {prediction_label}**")
+
+            # Show prediction confidence for each class
+            prob_df = pd.DataFrame({
+                "Category": [ANALYSIS_LABELS[i] for i in range(4)],
+                "Confidence": probabilities
+            })
+            st.bar_chart(prob_df.set_index("Category"))
+
+            # ---- Personalized Feedback ----
+            st.subheader("💬 Personalized Feedback")
+            st.info(get_feedback_message(prediction_label, scores))
+
+            # ---- Retake quiz option ----
+            if st.button("🔄 Retake Quiz"):
+                st.session_state.quiz_submitted = False
+                st.session_state.quiz_scores = {cat: 0 for cat in ANALYSIS_CATEGORIES}
+                # Clear previous answers so radios reset
+                for i in range(len(QUIZ_QUESTIONS)):
+                    key = f"quiz_q_{i}"
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
 
 
 # ---------------------------------------------------------
